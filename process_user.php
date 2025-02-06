@@ -1,10 +1,37 @@
 <?php
+// Start session if not already started
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+// Set content type as JSON and prevent caching
+header('Content-Type: application/json');
+header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+header('Cache-Control: post-check=0, pre-check=0', false);
+header('Pragma: no-cache');
+
+// Check if admin is logged in
+if (!isset($_SESSION['admin_id']) || empty($_SESSION['admin_id']) || !is_numeric($_SESSION['admin_id'])) {
+    http_response_code(401);
+    echo json_encode([
+        "success" => false,
+        "message" => "Unauthorized access. Please login as admin.",
+        "redirect" => "index.php"  
+    ]);
+    exit;
+}
+
+// Include required files
+require_once 'db_connection.php';
+require_once 'randomize/smtp_config.php';
+require_once 'vendor/autoload.php'; // Using composer autoloader
+
+use PHPMailer\PHPMailer\PHPMailer;
+use PHPMailer\PHPMailer\Exception;
+
 class SecureRequestHandler {
     /**
      * Safely process and validate JSON request body
-     * @param string $input Raw input from php://input
-     * @return array Sanitized data
-     * @throws Exception
      */
     public static function processRequestBody() {
         // Read raw input but limit size to prevent memory exhaustion
@@ -23,16 +50,10 @@ class SecureRequestHandler {
         return self::sanitizeRequestData($data);
     }
 
-    /**
-     * Read limited input to prevent memory exhaustion attacks
-     */
     private static function readLimitedInput($maxLength) {
         return file_get_contents("php://input", false, null, 0, $maxLength);
     }
 
-    /**
-     * Sanitize all request data
-     */
     private static function sanitizeRequestData($data) {
         $sanitized = [];
         $allowedFields = [
@@ -49,41 +70,24 @@ class SecureRequestHandler {
         return $sanitized;
     }
 
-    /**
-     * Sanitize individual fields
-     */
     private static function sanitizeField($value) {
         if (is_string($value)) {
-            // Remove null bytes
             $value = str_replace("\0", "", $value);
-            
-            // Remove any HTML tags
             $value = strip_tags($value);
-            
-            // Convert special characters to HTML entities
             $value = htmlspecialchars($value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-            
-            // Trim whitespace
-            $value = trim($value);
-            
-            return $value;
+            return trim($value);
         }
         return '';
     }
 }
 
 class SecureEmailGenerator {
-    /**
-     * Generate secure email content
-     */
     public static function generateEmailContent($username, $password, $projectName) {
-        // All variables are pre-sanitized but we'll add an extra layer of security
         $safeUsername = htmlspecialchars($username, ENT_QUOTES, 'UTF-8');
         $safePassword = htmlspecialchars($password, ENT_QUOTES, 'UTF-8');
         $safeProject = htmlspecialchars($projectName, ENT_QUOTES, 'UTF-8');
 
-        // Use heredoc for clear template structure
-        $template = <<<EMAIL
+        return <<<EMAIL
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
             <h2>Welcome to Our Platform</h2>
             <p>Hello,</p>
@@ -97,48 +101,147 @@ class SecureEmailGenerator {
             <p>Best regards,<br>Support Team</p>
         </div>
 EMAIL;
-
-        return $template;
     }
 }
 
-// Implementation in your main code
+class UserRegistrationService {
+    private $conn;
+    private $adminId;
+
+    public function __construct($conn, $adminId) {
+        $this->conn = $conn;
+        $this->adminId = $adminId;
+    }
+
+    public function registerUser($data) {
+        // Validate email
+        if (!filter_var($data['email'], FILTER_VALIDATE_EMAIL)) {
+            throw new Exception("Invalid email address");
+        }
+
+        // Check if email exists
+        $stmt = $this->conn->prepare("SELECT id FROM users WHERE email = ?");
+        $stmt->bind_param("s", $data['email']);
+        $stmt->execute();
+        if ($stmt->get_result()->num_rows > 0) {
+            throw new Exception("User already exists with this email.");
+        }
+        $stmt->close();
+
+        // Generate secure password
+        $generatedPassword = bin2hex(random_bytes(8));
+        $hashedPassword = password_hash($generatedPassword, PASSWORD_BCRYPT, ['cost' => 12]);
+
+        // Begin transaction
+        $this->conn->begin_transaction();
+
+        try {
+            // Insert user
+            $stmt = $this->conn->prepare(
+                "INSERT INTO users (email, first_name, last_name, username, password, level, tax_Id, Ph_no, country) 
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            );
+            
+            $stmt->bind_param(
+                "sssssssss",
+                $data['email'],
+                $data['first_name'],
+                $data['last_name'],
+                $data['username'],
+                $hashedPassword,
+                $data['level'],
+                $data['tax_Id'],
+                $data['Ph_no'],
+                $data['country']
+            );
+            
+            $stmt->execute();
+            $newUserId = $this->conn->insert_id;
+
+            // Insert project
+            $stmt = $this->conn->prepare(
+                "INSERT INTO projects (name, user_id, admin_id, created_at) 
+                 VALUES (?, ?, ?, NOW())"
+            );
+            
+            $stmt->bind_param("sii", $data['project'], $newUserId, $this->adminId);
+            $stmt->execute();
+
+            // Send welcome email
+            $this->sendWelcomeEmail($data['email'], $data['username'], $generatedPassword, $data['project']);
+
+            $this->conn->commit();
+            return true;
+
+        } catch (Exception $e) {
+            $this->conn->rollback();
+            throw $e;
+        }
+    }
+
+    private function sendWelcomeEmail($email, $username, $password, $projectName) {
+        $mail = new PHPMailer(true);
+
+        try {
+            // Server settings
+            $mail->isSMTP();
+            $mail->Host = SMTP_HOST;
+            $mail->SMTPAuth = true;
+            $mail->Username = SMTP_USERNAME;
+            $mail->Password = SMTP_PASSWORD;
+            $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
+            $mail->Port = SMTP_PORT;
+
+            // Recipients
+            $mail->setFrom(SMTP_USERNAME, 'Company Name');
+            $mail->addAddress($email);
+
+            // Content
+            $mail->isHTML(true);
+            $mail->Subject = 'Your Account Credentials';
+            $mail->Body = SecureEmailGenerator::generateEmailContent($username, $password, $projectName);
+            $mail->AltBody = strip_tags(str_replace(
+                ['<br>', '<br/>', '</p><p>', '</div><div>'],
+                "\n",
+                $mail->Body
+            ));
+
+            $mail->send();
+        } catch (Exception $e) {
+            throw new Exception("Email could not be sent: " . $mail->ErrorInfo);
+        }
+    }
+}
+
+// Main execution
 try {
+    $adminId = filter_var($_SESSION['admin_id'], FILTER_VALIDATE_INT);
+    
     // Process and sanitize request body
     $sanitizedData = SecureRequestHandler::processRequestBody();
     
-    // Your existing user creation code here...
+    // Initialize registration service
+    $registrationService = new UserRegistrationService($conn, $adminId);
     
-    // When sending email, use the secure template generator
-    $mail = new PHPMailer(true);
-    $mail->isSMTP();
-    // ... other PHPMailer configuration ...
-    
-    $mail->isHTML(true);
-    $mail->Subject = 'Your Account Credentials';
-    $mail->Body = SecureEmailGenerator::generateEmailContent(
-        $sanitizedData['username'] ?? '',
-        $generatedPassword,
-        $sanitizedData['project'] ?? ''
-    );
-    
-    // Add plain text alternative
-    $mail->AltBody = strip_tags(str_replace(
-        ['<br>', '<br/>', '</p><p>', '</div><div>'],
-        "\n",
-        $mail->Body
-    ));
-    
-    $mail->send();
-    
+    // Register user
+    if ($registrationService->registerUser($sanitizedData)) {
+        echo json_encode([
+            "success" => true,
+            "message" => "User and project created successfully, credentials sent to email."
+        ]);
+    }
+
 } catch (Exception $e) {
+    error_log("User registration error: " . $e->getMessage());
     http_response_code(500);
     echo json_encode([
         "success" => false,
         "message" => "An error occurred while processing the request"
     ]);
-    // Log the actual error securely
-    error_log("Email error: " . $e->getMessage());
-}
 
+} finally {
+    if (isset($conn)) {
+        $conn->close();
+    }
+}
 ?>
