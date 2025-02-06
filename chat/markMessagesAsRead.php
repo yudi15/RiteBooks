@@ -40,7 +40,7 @@ try {
     }
 } catch (Exception $e) {
     // Catch any database-related errors and return a friendly error message
-    echo json_encode(['success' => false, 'error' => 'Database error: ' . $e->getMessage()]);
+    //echo json_encode(['success' => false, 'error' => 'Database error: ' . $e->getMessage()]);
 }
 
 // Close the statement and connection
