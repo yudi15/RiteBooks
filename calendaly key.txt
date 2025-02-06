@@ -1,0 +1,26 @@
+Calendly secret keys
+
+Client ID
+
+lipwNoift9rr7adh7TMsUloDELy2MFN2luh5H6NLOy4
+
+
+
+Client secret
+D1_fDmpA-BC53tMZjlGVD_Wwe1qTDteGNuai0juXznM
+
+
+Webhook signing key
+OLNzM3SNhSMS8sXWsV-p1wxXruzy6IUiiuyueFQGk60
+
+
+
+
+Access Token
+eyJraWQiOiIxY2UxZTEzNjE3ZGNmNzY2YjNjZWJjY2Y4ZGM1YmFmYThhNjVlNjg0MDIzZjdjMzJiZTgzNDliMjM4MDEzNWI0IiwidHlwIjoiUEFUIiwiYWxnIjoiRVMyNTYifQ.eyJpc3MiOiJodHRwczovL2F1dGguY2FsZW5kbHkuY29tIiwiaWF0IjoxNzMwMzM2MDczLCJqdGkiOiIyNDU2OGRlMS02NDU1LTQ5ZjktOTk3MS1lYzNmMjdjMjY4OTciLCJ1c2VyX3V1aWQiOiJiNGFiOTJlNC1mZWQzLTRiOTYtOTQ2NS0wZDY5MGMwMGFkOWYifQ.15UXmDvJbpNufKcM4r59YTJNJTMcoqqd2h35HaZOHABhTssinshO8aFxIj6LKyd2ieqKs7pArhehHKfnQgL7iw
+
+
+
+
+
+https://api.calendly.com/v1/users/me/event_types
