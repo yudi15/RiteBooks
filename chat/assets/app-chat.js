@@ -218,7 +218,8 @@ class FileHandler {
         this.uploadState = new UploadState();
         this.uploadQueue = new UploadQueue(3);
         this.ui = new FileUploadUI(this);
-        this.domCache = new Map();
+        this.domCache = new WeakMap();
+        this.cleanupHandlers = new Set();
         this.uploadedFiles = [];
         this.pendingUploads = new Set();
 
@@ -257,6 +258,15 @@ class FileHandler {
         this.setupCleanup();
     }
 
+     registerEventListener(element, eventType, handler) {
+        if (!element) return;
+
+        element.addEventListener(eventType, handler);
+        this.cleanupHandlers.add(() => {
+            element.removeEventListener(eventType, handler);
+        });
+    }
+
     /* Initialize event listeners with proper cleanup
     initializeEventListeners() {
         const fileInput = this.getCachedElement('#fileInput');
@@ -275,10 +285,23 @@ class FileHandler {
 
     // Dispose and cleanup resources
     dispose() {
-        this.uploadQueue.abort();
-        this.cleanup.forEach(cleanup => cleanup());
-        this.cleanup = [];
+        // Execute all cleanup handlers
+        for (const cleanup of this.cleanupHandlers) {
+            cleanup();
+        }
+
+        // Clear maps and sets
         this.domCache = new WeakMap();
+        this.cleanupHandlers.clear();
+        this.uploadedFiles = [];
+        this.pendingUploads.clear();
+
+        // Abort any ongoing uploads
+        this.uploadQueue?.abort();
+
+        // Clear upload state
+        this.uploadState = null;
+        this.uploadQueue = null;
     }
 
     // Safe DOM element caching with WeakMap
@@ -362,8 +385,8 @@ class FileHandler {
 
     // Sanitize file names for display
     sanitizeFileName(fileName) {
-        return DOMPurify.sanitize(fileName.replace(/[^\w\s.-]/g, ''));
-    }
+            return DOMPurify.sanitize(fileName.replace(/[^a-zA-Z0-9._-]/g, ''));
+}
 
      // Handle multiple file upload with improved error handling
     async handleMultipleFileUpload(event) {
@@ -384,7 +407,9 @@ class FileHandler {
             }
         }
 
-        if (validFiles.length > 0) {
+         if (validFiles.length === 0) return [];
+
+         else if (validFiles.length > 0) {
             if (this.ui) {
                 this.ui.updateMultipleFileDisplay(this.uploadedFiles);
             }
@@ -451,6 +476,8 @@ class FileHandler {
 
     // Improved retry mechanism with exponential backoff
     async uploadWithRetry(file, attempt = 1) {
+        if (this.isFileUploading(file.name)) return;
+        //this.uploadState.updateStatus(file.name, 'uploading');
         try {
             return await this.uploadFileWithTimeout(file);
         } catch (error) {
@@ -675,7 +702,10 @@ class FileHandler {
 
         if (file) {
             this.uploadState.setError(file.name, error);
-            this.removeFile(file.name);
+            if (confirm(`File ${file.name} upload failed. Retry?`)) {
+            this.uploadWithRetry(file);
+        }
+            //this.removeFile(file.name);
         }
 
         UIFeedback.showError(error.message);
@@ -1414,7 +1444,30 @@ class MessageHandler {
 
     }
 
-     async sendMessage(messageText, files) {
+
+    async sendMessage(messageText, files) {
+    if (this.messageQueue.length > 0) {
+        console.warn("Previous message still processing. Please wait.");
+        return;
+    }
+
+    this.messageQueue.push({ messageText, files });
+
+    while (this.messageQueue.length > 0) {
+        const { messageText, files } = this.messageQueue.shift();
+        const success = await this._sendMessageInternal(messageText, files);
+
+        if (!success) return false; // If message sending fails, return false
+    }
+
+    return true;
+}
+
+
+
+
+
+     async _sendMessageInternal(messageText, files) {
 
      if (!this.fileHandler) {
             console.error('FileHandler not properly initialized');
@@ -1446,15 +1499,16 @@ class MessageHandler {
 
 
         const formData = this.createMessageFormData(messageText, files);
-        console.log("Muddassar is here   "+formData);
 
         try {
             const response = await fetch('/Admin2 - Copy/chat/sendMessage.php', {
                 method: 'POST',
+                headers: { 'X-CSRF-Token': window.csrfToken },  // Send CSRF token
                 body: formData
             });
 
             const data = await response.json();
+
             console.log('Send message response:', data); // Debug log
 
             if (data.success) {
@@ -1509,7 +1563,7 @@ class MessageHandler {
                 },
                 body: JSON.stringify({
                      project_id: projectId,  // Use project_id instead of message_ids
-                     sender_id: this.state.currentUserId     // Use sender_id instead of user_id  user_id: this.state.currentUserId
+                     sender_id: senderId      // Use sender_id instead of user_id  user_id: this.state.currentUserId
                 })
             });
 
@@ -1522,7 +1576,7 @@ class MessageHandler {
 
             const data = await response.json();
             if (data.success) {
-                this.state.lastReadMessageId = Math.max(...projectId);
+                this.state.lastReadMessageId = Math.max(this.state.lastReadMessageId, ...projectId);
             } else {
             console.warn("Failed to mark messages as read:", data.message || "Unknown error");
         }
@@ -1546,6 +1600,7 @@ class MessageHandler {
         formData.append('receiver_id', this.state.receiverId);
         formData.append('project_id', this.state.projectId);
         formData.append('sender_type', this.state.senderType);
+        formData.append('csrf_token', window.csrfToken);  // Include CSRF Token
 
     // Add temporary file information if files are present
         if (files && files.length > 0) {
@@ -1592,7 +1647,7 @@ class MessageHandler {
             this.fileHandler.uploadedFiles = [];
             this.fileHandler.resetState();
         }
-        alert("clearing1");
+        alert("clearing12222 ");
 
         this.state.isFileUploaded = false;
     }
@@ -1609,38 +1664,44 @@ class RealtimeUpdateManager {
         this.currentInterval = this.baseInterval;
         this.errorCount = 0;
         this.maxErrorCount = 3;
+        this.pollingTimeout = null;
+        this.isPolling = false;
     }
 
     startPolling() {
+        this.isPolling = true;
         const poll = async () => {
+            if (!this.isPolling || this.isUpdating) return;
+            this.isUpdating = true;
+
             try {
                 await this.updateCallback();
-
-                // Reset interval on successful update
                 this.currentInterval = this.baseInterval;
                 this.errorCount = 0;
             } catch (error) {
-                this.errorCount++;
-
-                // Exponential backoff with error count
-                this.currentInterval = Math.min(
-                    this.currentInterval * this.backoffFactor,
-                    this.maxInterval
-                );
-
-                // Stop polling after max error count
-                if (this.errorCount >= this.maxErrorCount) {
-                    console.error('Polling stopped due to repeated failures');
-                    return;
-                }
+                this.handlePollingError(error);
             } finally {
-                // Schedule next poll
-                setTimeout(poll, this.currentInterval);
+                this.isUpdating = false;
+                if (this.isPolling) {
+                    this.pollingTimeout = setTimeout(poll, this.currentInterval);
+                }
             }
         };
 
-        // Initial poll
         poll();
+    }
+
+    stopPolling() {
+        this.isPolling = false;
+        if (this.pollingTimeout) {
+            clearTimeout(this.pollingTimeout);
+            this.pollingTimeout = null;
+        }
+    }
+
+    dispose() {
+        this.stopPolling();
+        this.updateCallback = null;
     }
 }
 
@@ -1650,11 +1711,18 @@ class ChatApplication {
         // Initialize state first
         this.state = new ChatState();
 
+        this.cleanupHandlers = new Set();
+
         // Initialize all handlers with proper dependencies
         this.initializeHandlers();
 
         // Initialize the application
         this.initialize();
+    }
+
+
+    registerCleanup(handler) {
+        this.cleanupHandlers.add(handler);
     }
 
     initializeHandlers() {
@@ -1736,7 +1804,7 @@ class ChatApplication {
 
             setTimeout(() => {
                 this.messageHandler.scrollToBottom();
-            }, 100);
+            }, 500);
         }
     }
 
@@ -1779,13 +1847,35 @@ class ChatApplication {
         await this.chatHistoryHandler.loadChatHistory();
         this.fileListHandler.updateFilesList();
     }
-
+            //////
     // Add cleanup method for proper resource management
     dispose() {
-        if (this.fileHandler) {
-            this.fileHandler.dispose();
+        // Execute all cleanup handlers
+        for (const handler of this.cleanupHandlers) {
+            try {
+                handler();
+            } catch (error) {
+                console.error('Cleanup handler failed:', error);
+            }
         }
-        // Add other cleanup as needed
+
+        // Clear cleanup handlers
+        this.cleanupHandlers.clear();
+
+        // Dispose all major components
+        this.fileHandler?.dispose();
+        this.messageHandler?.dispose();
+        this.chatHistoryHandler?.dispose();
+        this.fileListHandler?.dispose();
+        this.fileUploadUI?.dispose();
+
+        // Clear state
+        this.state = null;
+
+        // Remove global reference
+        if (window.chatApp === this) {
+            delete window.chatApp;
+        }
     }
 }
                                  /////////////////
