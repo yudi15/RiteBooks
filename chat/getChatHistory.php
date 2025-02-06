@@ -154,10 +154,10 @@ try {
 } catch (Exception $e) {
     // Detailed error handling
     http_response_code(500);
-    echo json_encode([
+    /*echo json_encode([
         'error' => $e->getMessage(),
         'code' => $e->getCode()
-    ]);
+    ]);*/
 } finally {
     // Ensure resources are closed
     if (isset($stmt)) $stmt->close();
