@@ -1,12 +1,47 @@
 <?php
 
+use PHPMailer\PHPMailer\PHPMailer;
+use PHPMailer\PHPMailer\Exception;
+
+require '../vendor/autoload.php'; // Ensure PHPMailer is loaded
+
 
 // SMTP configuration settings
 define('SMTP_HOST', 'smtp.gmail.com');
 define('SMTP_USERNAME', 'ritebooks.operations@gmail.com');
 define('SMTP_PASSWORD', 'vola orkg yqai vcro');
-define('SMTP_PORT', 587);
+define('SMTP_PORT', 465);
 define('SMTP_ENCRYPTION', 'tls');
+define('SMTP_FROM_EMAIL', 'ritebooks.operations@gmail.com');
+define('SMTP_FROM_NAME', 'Project Management Team');
+
+// Function to send email notification
+function sendEmail($email, $userName, $subject, $body) {
+    $mail = new PHPMailer(true);
+
+    try {
+        $mail->isSMTP();
+        $mail->Host = SMTP_HOST;
+        $mail->SMTPAuth = true;
+        $mail->Username = SMTP_USERNAME;
+        $mail->Password = SMTP_PASSWORD;
+        $mail->SMTPSecure = PHPMailer::ENCRYPTION_SMTPS;
+        $mail->Port = SMTP_PORT;
+
+        $mail->setFrom(SMTP_FROM_EMAIL, SMTP_FROM_NAME);
+        $mail->addAddress($email, $userName);
+
+        $mail->isHTML(true);
+        $mail->Subject = $subject;
+        $mail->Body = $body;
+
+        $mail->send();
+        return true;
+    } catch (Exception $e) {
+        error_log("Mail error: {$mail->ErrorInfo}");
+        return false;
+    }
+}
 
 
 
