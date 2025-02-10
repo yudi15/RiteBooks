@@ -1,6 +1,9 @@
 <?php
 include_once 'db_connection.php';
-session_start();
+// Start session only if it's not already started
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
 
 // Determine user type
 $userType = isset($_SESSION['user_type']) ? $_SESSION['user_type'] : null;

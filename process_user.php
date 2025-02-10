@@ -24,10 +24,7 @@ if (!isset($_SESSION['admin_id']) || empty($_SESSION['admin_id']) || !is_numeric
 // Include required files
 require_once 'db_connection.php';
 require_once 'randomize/smtp_config.php';
-require_once 'vendor/autoload.php'; // Using composer autoloader
 
-use PHPMailer\PHPMailer\PHPMailer;
-use PHPMailer\PHPMailer\Exception;
 
 class SecureRequestHandler {
     /**
@@ -89,7 +86,7 @@ class SecureEmailGenerator {
 
         return <<<EMAIL
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-            <h2>Welcome to Our Platform</h2>
+            <h2>Welcome to RITEBOOKS</h2>
             <p>Hello,</p>
             <p>Your account has been created successfully. Here are your login credentials:</p>
             <div style="background-color: #f5f5f5; padding: 15px; margin: 20px 0;">
@@ -180,33 +177,14 @@ class UserRegistrationService {
     }
 
     private function sendWelcomeEmail($email, $username, $password, $projectName) {
-        $mail = new PHPMailer(true);
-
+        
         try {
-            // Server settings
-            $mail->isSMTP();
-            $mail->Host = SMTP_HOST;
-            $mail->SMTPAuth = true;
-            $mail->Username = SMTP_USERNAME;
-            $mail->Password = SMTP_PASSWORD;
-            $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
-            $mail->Port = SMTP_PORT;
+            $subject = 'Your Account Credentials';
+            $body  = SecureEmailGenerator::generateEmailContent($username, $password, $projectName);
+			
+			sendEmail($email, $username, $subject, $body); // Call the reusable function
 
-            // Recipients
-            $mail->setFrom(SMTP_USERNAME, 'Company Name');
-            $mail->addAddress($email);
 
-            // Content
-            $mail->isHTML(true);
-            $mail->Subject = 'Your Account Credentials';
-            $mail->Body = SecureEmailGenerator::generateEmailContent($username, $password, $projectName);
-            $mail->AltBody = strip_tags(str_replace(
-                ['<br>', '<br/>', '</p><p>', '</div><div>'],
-                "\n",
-                $mail->Body
-            ));
-
-            $mail->send();
         } catch (Exception $e) {
             throw new Exception("Email could not be sent: " . $mail->ErrorInfo);
         }

@@ -464,6 +464,7 @@ document.getElementById('assignProjectBtn').addEventListener('click', function (
 
   if (!userId || !projectName || !description) {
     alert('Please select a user, project, and description.');
+	spinner.style.display = 'none';
     return;
   }
   
@@ -481,6 +482,7 @@ document.getElementById('assignProjectBtn').addEventListener('click', function (
       } else if (data.success) {
         alert('Project assigned successfully!');
       } else {
+		  spinner.style.display = 'none';
         alert('Failed to assign project.');
       }
 	  // Hide the loading spinner
